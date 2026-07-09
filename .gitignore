@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local/private datasets
+data/*.jsonl
+data/*.jsonl.gz
+data/*.txt
+data/*.bin
+!data/README.md
+!data/sample_format.jsonl
+
+# Tokenizers generated locally
+tokenizer/*.json
+
+# Training outputs
+checkpoints/
+outputs/
+runs/
+wandb/
+
+# Model files
+*.pt
+*.pth
+*.safetensors
+*.gguf
+*.bin
+
+# System
+.DS_Store
+.env
