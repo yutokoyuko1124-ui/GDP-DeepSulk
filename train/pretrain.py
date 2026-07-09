@@ -39,6 +39,7 @@ def main() -> None:
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default="configs/tiny.json")
+    parser.add_argument("--resume", action="store_true", help="Resume from out_dir/ckpt.pt if it exists.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -57,6 +58,7 @@ def main() -> None:
     max_iters = int(cfg["max_iters"])
     eval_interval = int(cfg["eval_interval"])
     eval_iters = int(cfg["eval_iters"])
+    log_interval = int(cfg.get("log_interval", eval_interval))
 
     train_dtype = get_dtype_from_meta(args.train_bin)
     valid_dtype = get_dtype_from_meta(args.valid_bin)
@@ -88,12 +90,26 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = out_dir / "ckpt.pt"
+
+    best_val = float("inf")
+    start_iter = 0
+    if args.resume and ckpt_path.exists():
+        ckpt = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(ckpt["model"])
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        start_iter = int(ckpt.get("iter", -1)) + 1
+        best_val = float(ckpt.get("best_val_loss", best_val))
+        print(f"resumed {ckpt_path} from iter {start_iter - 1}")
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"device={device}")
     print(f"params={n_params/1e6:.2f}M")
     print(f"train_tokens={len(train_data):,}")
     print(f"valid_tokens={len(valid_data):,}")
+    print(f"log_interval={log_interval}")
+    print(f"eval_interval={eval_interval}")
 
     @torch.no_grad()
     def estimate_loss():
@@ -109,11 +125,10 @@ def main() -> None:
         model.train()
         return out
 
-    best_val = float("inf")
     t0 = time.time()
     model.train()
 
-    for it in range(max_iters + 1):
+    for it in range(start_iter, max_iters + 1):
         if it % eval_interval == 0:
             losses = estimate_loss()
             elapsed = time.time() - t0
@@ -122,13 +137,14 @@ def main() -> None:
                 best_val = losses["valid"]
                 ckpt = {
                     "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
                     "model_config": model_config.__dict__,
                     "train_config": cfg,
                     "iter": it,
                     "best_val_loss": best_val,
                 }
-                torch.save(ckpt, out_dir / "ckpt.pt")
-                print(f"saved {out_dir / 'ckpt.pt'}")
+                torch.save(ckpt, ckpt_path)
+                print(f"saved {ckpt_path}")
 
         optimizer.zero_grad(set_to_none=True)
         loss_accum = 0.0
@@ -143,6 +159,10 @@ def main() -> None:
 
         if not math.isfinite(loss_accum):
             raise RuntimeError(f"non-finite loss at iter {it}: {loss_accum}")
+
+        if it % log_interval == 0:
+            elapsed = time.time() - t0
+            print(f"iter {it}: step train loss {loss_accum:.4f}, time {elapsed:.1f}s")
 
     print("done")
 
