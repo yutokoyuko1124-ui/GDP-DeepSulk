@@ -39,12 +39,20 @@ def main() -> None:
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default="configs/tiny.json")
-    parser.add_argument("--resume", action="store_true", help="Resume from out_dir/ckpt.pt if it exists.")
+    parser.add_argument("--resume", action="store_true", help="Resume from out_dir/last.pt if it exists, otherwise out_dir/ckpt.pt.")
+    parser.add_argument("--resume-best", action="store_true", help="Resume from out_dir/ckpt.pt even when last.pt exists.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     tokenizer = Tokenizer.from_file(args.tokenizer)
     cfg["vocab_size"] = tokenizer.get_vocab_size()
+
+    num_threads = int(cfg.get("num_threads", 0))
+    if num_threads > 0:
+        torch.set_num_threads(num_threads)
+    interop_threads = int(cfg.get("interop_threads", 0))
+    if interop_threads > 0:
+        torch.set_num_interop_threads(interop_threads)
 
     device = cfg.get("device", "cpu")
     if device == "cuda" and not torch.cuda.is_available():
@@ -59,6 +67,8 @@ def main() -> None:
     eval_interval = int(cfg["eval_interval"])
     eval_iters = int(cfg["eval_iters"])
     log_interval = int(cfg.get("log_interval", eval_interval))
+    eval_train_loss = bool(cfg.get("eval_train_loss", True))
+    save_last_interval = int(cfg.get("save_last_interval", eval_interval))
 
     train_dtype = get_dtype_from_meta(args.train_bin)
     valid_dtype = get_dtype_from_meta(args.valid_bin)
@@ -70,12 +80,16 @@ def main() -> None:
     if len(valid_data) < block_size + 2:
         raise RuntimeError("valid dataset is too small for block_size")
 
+    offsets = np.arange(block_size, dtype=np.int64)
+
     def get_batch(split: str):
         data = train_data if split == "train" else valid_data
-        ix = torch.randint(len(data) - block_size - 1, (batch_size,))
-        x = torch.stack([torch.from_numpy(np.asarray(data[i:i+block_size], dtype=np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy(np.asarray(data[i+1:i+1+block_size], dtype=np.int64)) for i in ix])
-        return x.to(device), y.to(device)
+        ix = np.random.randint(0, len(data) - block_size - 1, size=(batch_size,), dtype=np.int64)
+        x_np = np.asarray(data[ix[:, None] + offsets], dtype=np.int64)
+        y_np = np.asarray(data[ix[:, None] + offsets + 1], dtype=np.int64)
+        x = torch.from_numpy(x_np)
+        y = torch.from_numpy(y_np)
+        return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
 
     model_config = GPTConfig(
         vocab_size=int(cfg["vocab_size"]),
@@ -90,32 +104,56 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path = out_dir / "ckpt.pt"
+    best_ckpt_path = out_dir / "ckpt.pt"
+    last_ckpt_path = out_dir / "last.pt"
+
+    def save_checkpoint(path: Path, it: int, best_val_loss: float) -> None:
+        ckpt = {
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "model_config": model_config.__dict__,
+            "train_config": cfg,
+            "iter": it,
+            "best_val_loss": best_val_loss,
+        }
+        torch.save(ckpt, path)
 
     best_val = float("inf")
     start_iter = 0
-    if args.resume and ckpt_path.exists():
-        ckpt = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(ckpt["model"])
-        if "optimizer" in ckpt:
-            optimizer.load_state_dict(ckpt["optimizer"])
-        start_iter = int(ckpt.get("iter", -1)) + 1
-        best_val = float(ckpt.get("best_val_loss", best_val))
-        print(f"resumed {ckpt_path} from iter {start_iter - 1}")
+    if args.resume or args.resume_best:
+        if args.resume_best:
+            resume_path = best_ckpt_path
+        else:
+            resume_path = last_ckpt_path if last_ckpt_path.exists() else best_ckpt_path
+        if resume_path.exists():
+            ckpt = torch.load(resume_path, map_location=device)
+            model.load_state_dict(ckpt["model"])
+            if "optimizer" in ckpt:
+                optimizer.load_state_dict(ckpt["optimizer"])
+            start_iter = int(ckpt.get("iter", -1)) + 1
+            best_val = float(ckpt.get("best_val_loss", best_val))
+            print(f"resumed {resume_path} from iter {start_iter - 1}")
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"device={device}")
     print(f"params={n_params/1e6:.2f}M")
     print(f"train_tokens={len(train_data):,}")
     print(f"valid_tokens={len(valid_data):,}")
+    print(f"batch_size={batch_size}")
+    print(f"grad_accum_steps={grad_accum_steps}")
     print(f"log_interval={log_interval}")
     print(f"eval_interval={eval_interval}")
+    print(f"eval_iters={eval_iters}")
+    print(f"eval_train_loss={eval_train_loss}")
+    print(f"save_last_interval={save_last_interval}")
+    print(f"torch_num_threads={torch.get_num_threads()}")
 
     @torch.no_grad()
     def estimate_loss():
         out = {}
         model.eval()
-        for split in ["train", "valid"]:
+        splits = ["valid"] if not eval_train_loss else ["train", "valid"]
+        for split in splits:
             losses = torch.zeros(eval_iters)
             for k in range(eval_iters):
                 X, Y = get_batch(split)
@@ -132,19 +170,14 @@ def main() -> None:
         if it % eval_interval == 0:
             losses = estimate_loss()
             elapsed = time.time() - t0
-            print(f"iter {it}: train loss {losses['train']:.4f}, valid loss {losses['valid']:.4f}, time {elapsed:.1f}s")
+            if eval_train_loss:
+                print(f"iter {it}: train loss {losses['train']:.4f}, valid loss {losses['valid']:.4f}, time {elapsed:.1f}s")
+            else:
+                print(f"iter {it}: valid loss {losses['valid']:.4f}, time {elapsed:.1f}s")
             if losses["valid"] < best_val:
                 best_val = losses["valid"]
-                ckpt = {
-                    "model": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "model_config": model_config.__dict__,
-                    "train_config": cfg,
-                    "iter": it,
-                    "best_val_loss": best_val,
-                }
-                torch.save(ckpt, ckpt_path)
-                print(f"saved {ckpt_path}")
+                save_checkpoint(best_ckpt_path, it, best_val)
+                print(f"saved best {best_ckpt_path}")
 
         optimizer.zero_grad(set_to_none=True)
         loss_accum = 0.0
@@ -164,6 +197,12 @@ def main() -> None:
             elapsed = time.time() - t0
             print(f"iter {it}: step train loss {loss_accum:.4f}, time {elapsed:.1f}s")
 
+        if save_last_interval > 0 and it % save_last_interval == 0:
+            save_checkpoint(last_ckpt_path, it, best_val)
+            print(f"saved last {last_ckpt_path}")
+
+    save_checkpoint(last_ckpt_path, max_iters, best_val)
+    print(f"saved last {last_ckpt_path}")
     print("done")
 
 
