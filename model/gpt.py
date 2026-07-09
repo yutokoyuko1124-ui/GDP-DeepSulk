@@ -120,16 +120,64 @@ class GPT(nn.Module):
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
 
+    @staticmethod
+    def _apply_repetition_penalty(logits: torch.Tensor, idx: torch.Tensor, penalty: float) -> None:
+        if penalty <= 1.0:
+            return
+        for b in range(idx.size(0)):
+            token_ids = torch.unique(idx[b])
+            scores = logits[b, token_ids]
+            logits[b, token_ids] = torch.where(scores < 0, scores * penalty, scores / penalty)
+
+    @staticmethod
+    def _ban_repeated_ngrams(logits: torch.Tensor, idx: torch.Tensor, ngram_size: int) -> None:
+        if ngram_size <= 1:
+            return
+        for b in range(idx.size(0)):
+            tokens = idx[b].tolist()
+            if len(tokens) < ngram_size - 1:
+                continue
+            prefix = tuple(tokens[-(ngram_size - 1):])
+            banned = []
+            for i in range(len(tokens) - ngram_size + 1):
+                if tuple(tokens[i:i + ngram_size - 1]) == prefix:
+                    banned.append(tokens[i + ngram_size - 1])
+            if banned:
+                logits[b, banned] = -float("inf")
+
     @torch.no_grad()
-    def generate(self, idx: torch.Tensor, max_new_tokens: int, temperature: float = 1.0, top_k: Optional[int] = 50):
+    def generate(
+        self,
+        idx: torch.Tensor,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k: Optional[int] = 50,
+        repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 0,
+        eos_token_id: Optional[int] = None,
+    ):
+        finished = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.config.block_size:]
             logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / max(temperature, 1e-6)
-            if top_k is not None:
+            logits = logits[:, -1, :]
+
+            self._apply_repetition_penalty(logits, idx, repetition_penalty)
+            self._ban_repeated_ngrams(logits, idx, no_repeat_ngram_size)
+
+            logits = logits / max(temperature, 1e-6)
+            if eos_token_id is not None and finished.any():
+                logits[finished] = -float("inf")
+                logits[finished, eos_token_id] = 0.0
+            if top_k is not None and top_k > 0:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float("Inf")
+                logits[logits < v[:, [-1]]] = -float("inf")
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, idx_next), dim=1)
+
+            if eos_token_id is not None:
+                finished |= idx_next.squeeze(1).eq(eos_token_id)
+                if finished.all():
+                    break
         return idx
