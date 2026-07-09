@@ -117,6 +117,30 @@ python train/pretrain.py \
   --config configs/tiny.json
 ```
 
+### 6.5. Fast low-RAM mode
+
+`configs/tiny_lowram_fast.json` は、Ryzen 3 / 8GB RAM で長時間回すための速め設定です。
+
+- `batch_size=4`
+- `eval_interval=1000`
+- `eval_iters=2`
+- `eval_train_loss=false`
+- `save_last_interval=500`
+- `num_threads=8`
+- `max_iters=1000000`
+
+```bash
+python train/pretrain.py \
+  --train-bin data/train.bin \
+  --valid-bin data/valid.bin \
+  --tokenizer tokenizer/gdp_deepsulk_tokenizer.json \
+  --out-dir checkpoints/tiny_lowram \
+  --config configs/tiny_lowram_fast.json \
+  --resume
+```
+
+`--resume` は `last.pt` があればそこから再開します。ベストcheckpointから再開したい場合は `--resume-best` を使います。
+
 ### 7. Generate text
 
 ```bash
@@ -125,6 +149,23 @@ python infer/generate.py \
   --tokenizer tokenizer/gdp_deepsulk_tokenizer.json \
   --prompt "吾輩は" \
   --max-new-tokens 100
+```
+
+### 7.5. Generate more samples with anti-repeat
+
+同じプロンプトから複数候補を一気に出します。
+
+```bash
+python infer/generate.py \
+  --checkpoint checkpoints/tiny_lowram/ckpt.pt \
+  --tokenizer tokenizer/gdp_deepsulk_tokenizer.json \
+  --prompt "吾輩は猫である。" \
+  --max-new-tokens 60 \
+  --temperature 0.7 \
+  --top-k 50 \
+  --num-samples 4 \
+  --repetition-penalty 1.15 \
+  --no-repeat-ngram-size 3
 ```
 
 ---
