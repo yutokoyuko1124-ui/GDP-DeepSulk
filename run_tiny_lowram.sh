@@ -9,9 +9,12 @@ python scripts/split_jsonl.py \
   --valid data/valid.jsonl \
   --valid-ratio 0.02
 
-# Train tokenizer on a sample to avoid OOM on 8GB RAM machines.
-# The full dataset is still used for language-model training after tokenization.
-head -n 10000 data/train.jsonl > data/tokenizer_sample.jsonl
+# Create a tokenizer sample spread across the whole dataset to avoid OOM.
+# BPE training itself is RAM-heavy, so we train the tokenizer on a representative sample.
+python scripts/make_tokenizer_sample.py \
+  --input data/train.jsonl \
+  --output data/tokenizer_sample.jsonl \
+  --max-lines 12000
 
 python scripts/train_tokenizer.py \
   --input data/tokenizer_sample.jsonl \
