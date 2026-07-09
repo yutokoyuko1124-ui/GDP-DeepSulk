@@ -1,0 +1,15 @@
+{
+  "vocab_size": 8000,
+  "block_size": 256,
+  "n_layer": 4,
+  "n_head": 4,
+  "n_embd": 256,
+  "dropout": 0.1,
+  "batch_size": 8,
+  "learning_rate": 0.0005,
+  "max_iters": 2000,
+  "eval_interval": 200,
+  "eval_iters": 20,
+  "grad_accum_steps": 1,
+  "device": "cpu"
+}
