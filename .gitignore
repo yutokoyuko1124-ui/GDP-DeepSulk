@@ -21,6 +21,9 @@ outputs/
 runs/
 wandb/
 
+# Logs generated locally
+*.log
+
 # Model files
 *.pt
 *.pth
