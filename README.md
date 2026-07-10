@@ -141,6 +141,56 @@ python train/pretrain.py \
 
 `--resume` は `last.pt` があればそこから再開します。ベストcheckpointから再開したい場合は `--resume-best` を使います。
 
+### 6.6. PID-controlled 12.28M training
+
+`pid_control_train_12m.py` は CPU温度と `available` RAM を見ながら、`batch_size` と `num_threads` を自動で上げ下げする制御スクリプトです。
+
+目標:
+
+- CPU温度目標: `Tctl 68℃`
+- 通常上限: `75℃`
+- 強制DOWN: `76℃以上`
+- 最低RAM: `available 0.5GiB`
+- 最大profile: `batch_size=48`, `num_threads=8`
+
+起動:
+
+```bash
+chmod +x pid_control_train_12m.py gdpdash.py gdpmon_once.sh gdpboost
+nohup python -u pid_control_train_12m.py > pid_control_stdout.log 2>&1 &
+```
+
+watch風モニター:
+
+```bash
+watch -n 1 ./gdpmon_once.sh
+```
+
+対話式ダッシュボード:
+
+```bash
+sudo -v
+./gdpdash.py
+```
+
+`gdpdash.py` では `ESC` でコマンド欄に入り、以下を使えます。
+
+```text
+!boost on
+!boost off
+!boost status
+```
+
+`Tctl >= 85℃` になると画面上部に警告を出し、端末ベルを鳴らします。
+
+CPUブーストだけ切り替える場合:
+
+```bash
+./gdpboost on
+./gdpboost off
+./gdpboost status
+```
+
 ### 7. Generate text
 
 ```bash
