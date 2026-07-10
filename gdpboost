@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BOOST_FILE="/sys/devices/system/cpu/cpufreq/boost"
+
+if [ ! -f "$BOOST_FILE" ]; then
+  echo "boost file not found: $BOOST_FILE"
+  exit 1
+fi
+
+case "${1:-status}" in
+  on|1)
+    echo 1 | sudo tee "$BOOST_FILE" >/dev/null
+    echo "BOOST: ON"
+    ;;
+  off|0)
+    echo 0 | sudo tee "$BOOST_FILE" >/dev/null
+    echo "BOOST: OFF"
+    ;;
+  status)
+    v="$(cat "$BOOST_FILE")"
+    if [ "$v" = "1" ]; then
+      echo "BOOST: ON"
+    else
+      echo "BOOST: OFF"
+    fi
+    ;;
+  *)
+    echo "usage: ./gdpboost on|off|status"
+    exit 1
+    ;;
+esac
