@@ -50,6 +50,34 @@ Expected JSONL format:
 {"text": "ある日の暮方の事である。"}
 ```
 
+### Qt Dataset Builder
+
+Ubuntu Desktop向けのQt GUIで、RealPersonaChatと日本語Wikipediaを自動取得・前処理できます。
+
+モード:
+
+- RealPersonaChatのみ
+- Wikipediaのみ
+- **洗濯**: RealPersonaChatとWikipediaを混ぜたJSONLを出力
+
+GUIには進捗バー、リアルタイムログ、キャンセル、出力先選択、件数・品質・分割設定があります。生成先には `dataset_manifest.json` と `DATASET_LICENSE.md` も自動作成します。
+
+```bash
+git clone https://github.com/yutokoyuko1124-ui/GDP-DeepSulk.git
+cd GDP-DeepSulk
+chmod +x setup_dataset_gui_ubuntu.sh run_dataset_gui.sh install_dataset_gui_desktop.sh
+./setup_dataset_gui_ubuntu.sh
+./run_dataset_gui.sh
+```
+
+詳細: [`docs/DATASET_BUILDER_GUI.md`](docs/DATASET_BUILDER_GUI.md)
+
+データセットの基本ライセンス表示:
+
+- RealPersonaChat: CC BY-SA 4.0
+- Wikipedia: CC BY-SA 4.0、提供元 Wikimedia Foundationおよび各記事の執筆者
+- 不要データ除外・形式変換・混合後のデータセット: CC BY-SA 4.0
+
 ---
 
 ## Quick Start
