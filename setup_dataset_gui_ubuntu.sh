@@ -8,13 +8,14 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! python3 -m venv --help >/dev/null 2>&1; then
-  echo "python3-venv を導入します。"
+if ! python3 -m venv .venv; then
+  echo "venv作成に失敗したため python3-venv を導入します。"
   sudo apt update
   sudo apt install -y python3-venv python3-pip
+  rm -rf .venv
+  python3 -m venv .venv
 fi
 
-python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -r requirements-gui.txt
