@@ -1,0 +1,25 @@
+name: Syntax check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python syntax
+        run: |
+          python -m py_compile tools/dataset_builder_gui.py
+          python -m py_compile train/pretrain.py
+      - name: Shell syntax
+        run: |
+          bash -n setup_dataset_gui_ubuntu.sh
+          bash -n run_dataset_gui.sh
+          bash -n install_dataset_gui_desktop.sh
+          bash -n setup_xpu_ubuntu.sh
+          bash -n run_xpu_bf16.sh
