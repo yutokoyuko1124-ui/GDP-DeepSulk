@@ -8,4 +8,4 @@ if [[ ! -x .venv/bin/python ]]; then
   exit 1
 fi
 
-exec .venv/bin/python tools/dataset_builder_gui.py "$@"
+exec .venv/bin/python -m tools.dataset_builder_aria2 "$@"
