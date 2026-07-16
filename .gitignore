@@ -12,6 +12,9 @@ data/*.bin
 !data/README.md
 !data/sample_format.jsonl
 
+# Dataset Builder downloads and generated corpora
+data/dataset_builder/
+
 # Tokenizers generated locally
 tokenizer/*.json
 
